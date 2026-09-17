@@ -19,4 +19,9 @@ class AppColors {
   // Bordes y Sombra
   static const Color border = Color(0xFFD8B4FE);        // Bordes finos de los inputs y cards
   static const Color shadow = Color(0x1A4C1D95);
+
+  // Acento ámbar (del logo) y fondo oscuro (splash / pantalla de acceso)
+  static const Color accentAmber = Color(0xFFFFC72C);
+  static const Color accentAmberLight = Color(0xFFFFDE8A);
+  static const Color darkBackground = Color(0xFF0D0620);
 }
