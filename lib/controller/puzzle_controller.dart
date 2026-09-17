@@ -5,7 +5,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
+import '../database/db_helper.dart';
+import '../models/game_result.dart';
 import '../models/puzzle_tile.dart';
+import 'algorithm_controller.dart' show AlgorithmController;
 
 // Estructura de datos auxiliar para pasar parámetros al hilo secundario (Isolate)
 class _CropParams {
@@ -26,16 +29,31 @@ class _CropResult {
 class PuzzleController extends ChangeNotifier {
   final ImagePicker _picker = ImagePicker();
 
+  final int userId;
+
   List<PuzzleTile> tiles = [];
   int gridSize;
   bool isLoading = false;
   bool isCompleted = false;
 
+  int moveCount = 0;
+  DateTime? _startedAt;
+  int? _elapsedSecondsAtFinish;
+  bool _resultSaved = false;
+
+  /// Segundos transcurridos desde que se generó el tablero. Se congela en el
+  /// valor final apenas se completa el rompecabezas.
+  int get elapsedSeconds {
+    if (_elapsedSecondsAtFinish != null) return _elapsedSecondsAtFinish!;
+    if (_startedAt == null) return 0;
+    return DateTime.now().difference(_startedAt!).inSeconds;
+  }
+
   // Propiedad requerida por GamePlayScreen para mostrar la vista previa
   Uint8List? _fullImageBytes;
   Uint8List? get fullImageBytes => _fullImageBytes;
 
-  PuzzleController({this.gridSize = 2});
+  PuzzleController({this.gridSize = 2, required this.userId});
 
   // LÓGICA DE MOVIMIENTO 
 
@@ -80,6 +98,7 @@ class PuzzleController extends ChangeNotifier {
       tiles[indicePiezaTocada].currentIndex = indicePiezaTocada;
       tiles[indiceVacio].currentIndex = indiceVacio;
 
+      moveCount++;
       _verificarVictoria();
       notifyListeners();
     }
@@ -92,7 +111,37 @@ class PuzzleController extends ChangeNotifier {
         return;
       }
     }
+
+    final bool justFinished = !isCompleted;
     isCompleted = true;
+
+    if (justFinished) {
+      _elapsedSecondsAtFinish ??= elapsedSeconds;
+      _saveResult();
+    }
+  }
+
+  Future<void> _saveResult() async {
+    if (_resultSaved) return;
+    _resultSaved = true;
+
+    try {
+      await DBHelper.insertResult(GameResult(
+        userId: userId,
+        level: '${gridSize}x$gridSize',
+        moves: moveCount,
+        timeInSeconds: elapsedSeconds,
+        date: _formatDate(DateTime.now()),
+      ));
+    } catch (e) {
+      debugPrint('No se pudo guardar el resultado: $e');
+      _resultSaved = false;
+    }
+  }
+
+  String _formatDate(DateTime dt) {
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${dt.year}-${two(dt.month)}-${two(dt.day)} ${two(dt.hour)}:${two(dt.minute)}';
   }
 
   // MÉTODOS DE CÁMARA Y GALERÍA CON ISOLATES (COMPUTE)
@@ -106,7 +155,6 @@ class PuzzleController extends ChangeNotifier {
   }
 
   Future<bool> _processImage(ImageSource source, int? size) async {
-    if (size != null) gridSize = size;
     isLoading = true;
     isCompleted = false;
     notifyListeners();
@@ -130,28 +178,81 @@ class PuzzleController extends ChangeNotifier {
       }
 
       final Uint8List bytes = await File(photo.path).readAsBytes();
-
-      // Ejecuta el recorte y guardado de imagen en un hilo secundario
-      _CropResult result = await compute(
-        _splitAndRoundImageTask,
-        _CropParams(bytes, gridSize),
-      );
-
-      // Guarda la imagen completa recortada para la vista previa
-      _fullImageBytes = result.fullImageBytes;
-
-      // Mezcla realizando movimientos válidos para garantizar resolubilidad
-      tiles = _mezclarPiezasGarantizadas(result.tiles);
-
-      isLoading = false;
-      notifyListeners();
-      return true;
+      return _buildPuzzleFromBytes(bytes, size);
     } catch (e) {
       debugPrint("Error al procesar la imagen: $e");
       isLoading = false;
       notifyListeners();
       return false;
     }
+  }
+
+  /// Arma el rompecabezas a partir de bytes de imagen que no vienen de la
+  /// cámara/galería (por ejemplo, una foto elegida en la galería de
+  /// Unsplash). Reutiliza exactamente el mismo pipeline de recorte y mezcla.
+  Future<bool> useExternalImageBytes(Uint8List bytes, {int? size}) async {
+    isLoading = true;
+    isCompleted = false;
+    notifyListeners();
+
+    try {
+      return await _buildPuzzleFromBytes(bytes, size);
+    } catch (e) {
+      debugPrint("Error al procesar la imagen: $e");
+      isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> _buildPuzzleFromBytes(Uint8List bytes, int? size) async {
+    if (size != null) gridSize = size;
+
+    // Ejecuta el recorte y guardado de imagen en un hilo secundario
+    _CropResult result = await compute(
+      _splitAndRoundImageTask,
+      _CropParams(bytes, gridSize),
+    );
+
+    // Guarda la imagen completa recortada para la vista previa
+    _fullImageBytes = result.fullImageBytes;
+
+    // Mezcla realizando movimientos válidos para garantizar resolubilidad,
+    // y lo confirma explícitamente con el teorema de paridad antes de
+    // entregarle el tablero al jugador.
+    tiles = _generarTablasSolucionable(result.tiles);
+
+    moveCount = 0;
+    _elapsedSecondsAtFinish = null;
+    _resultSaved = false;
+    _startedAt = DateTime.now();
+
+    isLoading = false;
+    notifyListeners();
+    return true;
+  }
+
+  /// Mezcla el tablero y, antes de entregarlo, verifica con el teorema de
+  /// paridad de inversiones que efectivamente sea solucionable. El mezclado
+  /// por movimientos válidos ya lo garantiza matemáticamente, pero se vuelve
+  /// a comprobar de forma explícita como red de seguridad; si por algún
+  /// motivo fallara, se reintenta con una nueva mezcla.
+  List<PuzzleTile> _generarTablasSolucionable(List<PuzzleTile> original) {
+    for (int intento = 0; intento < 5; intento++) {
+      final List<PuzzleTile> mezcladas = _mezclarPiezasGarantizadas(original);
+
+      final List<int> board = mezcladas.map((t) => t.correctIndex).toList();
+      final int blankValue = mezcladas.firstWhere((t) => t.isEmpty).correctIndex;
+
+      if (AlgorithmController.isSolvable(board, gridSize, blankValue)) {
+        return mezcladas;
+      }
+
+      debugPrint('Mezcla no solucionable detectada, reintentando ($intento)...');
+    }
+
+    // No debería llegar nunca hasta acá; se devuelve la última mezcla igual.
+    return _mezclarPiezasGarantizadas(original);
   }
 
   // Mezcla inteligente: Simula movimientos aleatorios válidos para asegurar que el tablero sea 100% resoluble

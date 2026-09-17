@@ -1,20 +1,18 @@
-import 'dart:async';
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:collection/collection.dart';
 import 'puzzle_controller.dart';
 
-/// 1. TABLERO & 2. ESTADO
-/// Representa el estado actual del tablero de juego.
+/// Representa un estado del tablero durante la búsqueda A*.
 class PuzzleState {
-  final List<int> board; // Lista 1D que representa el tablero (ej: [0, 1, 2, ...])
-  final int emptyIndex;  // Índice donde está el hueco/pieza vacía
-  final int gridSize;    // Tamaño de la matriz (N x N)
-  
-  final PuzzleState? parent;    // Referencia al estado padre para reconstruir el camino
-  final int? clickedTileIndex;  // Índice físico que la UI debe presionar para llegar a este estado
-  final String? moveMade;       // Nombre de la dirección realizada
-  
-  final int g; // 6. Costo acumulado (pasos desde el inicio)
-  final int h; // 5. Heurística (distancia estimada al objetivo)
+  final List<int> board;
+  final int emptyIndex;
+  final int gridSize;
+
+  final PuzzleState? parent;
+  final int? clickedTileIndex;
+
+  final int g;
+  final int h;
 
   PuzzleState({
     required this.board,
@@ -22,18 +20,15 @@ class PuzzleState {
     required this.gridSize,
     this.parent,
     this.clickedTileIndex,
-    this.moveMade,
     this.g = 0,
     this.h = 0,
   });
 
-  /// 7. f = g + h (Costo total estimado)
   int get f => g + h;
 
-  /// Clave única para guardar el estado en la lista CLOSED y evitar ciclos
+  /// Clave única para identificar este arreglo de piezas en los mapas de A*.
   String get id => board.join(',');
 
-  /// Verifica si el tablero actual es el estado objetivo (resuelto)
   bool isSolved() {
     for (int i = 0; i < board.length; i++) {
       if (board[i] != i) return false;
@@ -42,209 +37,288 @@ class PuzzleState {
   }
 }
 
+/// Parámetros que se pasan al isolate de `compute()`.
+class _AStarParams {
+  final List<int> board;
+  final int emptyIndex;
+  final int gridSize;
+  final int blankValue;
+
+  _AStarParams({
+    required this.board,
+    required this.emptyIndex,
+    required this.gridSize,
+    required this.blankValue,
+  });
+}
+
 class AlgorithmController extends ChangeNotifier {
   bool _isSolving = false;
   bool get isSolving => _isSolving;
 
-  /// Método principal ejecutado desde la pantalla
-  Future<void> solveWithAStar(PuzzleController puzzleController) async {
-    if (_isSolving || puzzleController.isCompleted) return;
+  /// Máximo de estados a explorar antes de rendirse. Con Manhattan + conflicto
+  /// lineal, un 4x4 barajado razonablemente se resuelve muy por debajo de esto;
+  /// el límite solo evita que un caso patológico cuelgue la app para siempre.
+  static const int _maxNodesExplored = 300000;
+
+  /// Verifica si un rompecabezas es teóricamente solucionable usando el
+  /// teorema clásico de paridad de inversiones para el "N-puzzle".
+  ///
+  /// [board] es la lista de valores correctos (correctIndex) en el orden
+  /// actual de las piezas, y [blankValue] es el valor que identifica al
+  /// espacio vacío dentro de esa lista.
+  static bool isSolvable(List<int> board, int gridSize, int blankValue) {
+    final List<int> sequence = board.where((v) => v != blankValue).toList();
+
+    int inversions = 0;
+    for (int i = 0; i < sequence.length; i++) {
+      for (int j = i + 1; j < sequence.length; j++) {
+        if (sequence[i] > sequence[j]) inversions++;
+      }
+    }
+
+    if (gridSize.isOdd) {
+      // Tablero de lado impar (ej. 3x3): solucionable si las inversiones son pares.
+      return inversions.isEven;
+    }
+
+    // Tablero de lado par (ej. 4x4): depende también de la fila del vacío
+    // contada desde abajo (1-indexed).
+    final int blankIndex = board.indexOf(blankValue);
+    final int blankRowFromBottom = gridSize - (blankIndex ~/ gridSize);
+
+    if (blankRowFromBottom.isEven) {
+      return inversions.isOdd;
+    } else {
+      return inversions.isEven;
+    }
+  }
+
+  /// Método principal ejecutado desde la pantalla de juego. Devuelve mensajes
+  /// de diagnóstico (vacío si resolvió y animó todo con éxito).
+  Future<List<String>> solveWithAStar(PuzzleController puzzleController) async {
+    if (_isSolving || puzzleController.isCompleted) return const [];
 
     _isSolving = true;
     notifyListeners();
 
-    // 1 & 2. TABLERO Y ESTADO INICIAL
-    final int gridSize = puzzleController.gridSize;
-    final List<int> initialBoard = puzzleController.tiles
-        .map((tile) => tile.correctIndex)
-        .toList();
+    final List<String> messages = [];
 
-    // CORRECCIÓN 1: Buscar el índice del espacio vacío directamente desde las propiedades del tile
-    final int emptyIndexInController = puzzleController.tiles
-        .indexWhere((tile) => tile.isEmpty || tile.imageBytes.isEmpty);
+    try {
+      final int gridSize = puzzleController.gridSize;
+      final List<int> initialBoard =
+          puzzleController.tiles.map((tile) => tile.correctIndex).toList();
 
-    // Si no se detectó por propiedad, usar el índice por defecto
-    final int emptyIndex = (emptyIndexInController != -1)
-        ? emptyIndexInController
-        : initialBoard.indexOf(puzzleController.tiles.length - 1);
+      final int emptyIndex = puzzleController.tiles.indexWhere((t) => t.isEmpty);
+      final int blankValue = puzzleController.tiles[emptyIndex].correctIndex;
 
-    PuzzleState initialState = PuzzleState(
-      board: initialBoard,
-      emptyIndex: emptyIndex,
-      gridSize: gridSize,
-      g: 0,
-      h: _calculateManhattanDistance(initialBoard, gridSize),
-    );
-
-    // 9. EJECUTAR A*
-    List<int> solutionMoves = _runAStar(initialState);
-
-    // 11 & 12. LISTA DE MOVIMIENTOS Y ANIMAR EN FLUTTER
-    if (solutionMoves.isNotEmpty) {
-      await _animateSolution(puzzleController, solutionMoves);
-    }
-
-    _isSolving = false;
-    notifyListeners();
-  }
-
-  // ==========================================
-  // 5. HEURÍSTICA h (Distancia de Manhattan)
-  // ==========================================
-  int _calculateManhattanDistance(List<int> board, int gridSize) {
-    int totalDistance = 0;
-
-    for (int currentIndex = 0; currentIndex < board.length; currentIndex++) {
-      int value = board[currentIndex];
-      
-      // Ignoramos la pieza vacía para la heurística
-      if (value == board.length - 1) continue;
-
-      // Fila y Columna actual
-      int currentTileRow = currentIndex ~/ gridSize;
-      int currentTileCol = currentIndex % gridSize;
-
-      // Fila y Columna donde DEBERÍA estar
-      int targetRow = value ~/ gridSize;
-      int targetCol = value % gridSize;
-
-      // Suma de distancias verticales y horizontales
-      totalDistance += (currentTileRow - targetRow).abs() +
-                       (currentTileCol - targetCol).abs();
-    }
-
-    return totalDistance;
-  }
-
-  // ==========================================
-  // 3. MOVIMIENTOS VÁLIDOS Y 4. VECINOS
-  // ==========================================
-  List<PuzzleState> _getNeighbors(PuzzleState currentState) {
-    List<PuzzleState> neighbors = [];
-    int emptyIdx = currentState.emptyIndex;
-    int size = currentState.gridSize;
-
-    int row = emptyIdx ~/ size;
-    int col = emptyIdx % size;
-
-    // Mapa de posiciones contiguas que pueden moverse hacia el espacio vacío
-    final Map<String, int?> possibleMoves = {
-      'ARRIBA': (row > 0) ? emptyIdx - size : null,
-      'ABAJO': (row < size - 1) ? emptyIdx + size : null,
-      'IZQUIERDA': (col > 0) ? emptyIdx - 1 : null,
-      'DERECHA': (col < size - 1) ? emptyIdx + 1 : null,
-    };
-
-    possibleMoves.forEach((direction, targetIdx) {
-      // 3. Verificar que el movimiento esté dentro de los límites del tablero
-      if (targetIdx != null) {
-        List<int> newBoard = List.from(currentState.board);
-        int tileToMove = newBoard[targetIdx];
-
-        // Intercambiar pieza vacía con la pieza que se desliza
-        newBoard[emptyIdx] = tileToMove;
-        newBoard[targetIdx] = currentState.board[emptyIdx];
-
-        // 6 & 7. Calcular g y h para el vecino
-        int newG = currentState.g + 1;
-        int newH = _calculateManhattanDistance(newBoard, size);
-
-        // 4. CORRECCIÓN 2: Guardamos `clickedTileIndex: targetIdx`
-        // Esto indica qué casilla debe presionar la UI para realizar este movimiento.
-        neighbors.add(
-          PuzzleState(
-            board: newBoard,
-            emptyIndex: targetIdx,
-            gridSize: size,
-            parent: currentState,
-            clickedTileIndex: targetIdx,
-            moveMade: direction,
-            g: newG,
-            h: newH,
-          ),
-        );
-      }
-    });
-
-    return neighbors;
-  }
-
-  // ==========================================
-  // 8. OPEN / CLOSED & 9. A*
-  // ==========================================
-  List<int> _runAStar(PuzzleState startState) {
-    // 8. OPEN (Estados pendientes por explorar)
-    List<PuzzleState> openList = [startState];
-
-    // 8. CLOSED (Estados ya explorados para evitar bucles)
-    Set<String> closedSet = {};
-
-    while (openList.isNotEmpty) {
-      // Ordenar por el menor costo 'f = g + h'
-      openList.sort((a, b) => a.f.compareTo(b.f));
-      
-      // Obtener el nodo con menor 'f'
-      PuzzleState currentState = openList.removeAt(0);
-
-      // Si ya está resuelto, reconstruimos la ruta
-      if (currentState.isSolved()) {
-        // 10. RECONSTRUIR CAMINO
-        return _reconstructPath(currentState);
+      if (!isSolvable(initialBoard, gridSize, blankValue)) {
+        // Por construcción (el mezclado solo usa movimientos válidos) esto no
+        // debería pasar nunca, pero lo verificamos explícitamente antes de
+        // gastar tiempo de cómputo en una búsqueda imposible.
+        messages.add('Este tablero no es solucionable (verificación de paridad).');
+        return messages;
       }
 
-      closedSet.add(currentState.id);
+      final List<int> solutionMoves = await compute(
+        _runAStarIsolate,
+        _AStarParams(
+          board: initialBoard,
+          emptyIndex: emptyIndex,
+          gridSize: gridSize,
+          blankValue: blankValue,
+        ),
+      );
 
-      // Evaluar vecinos
-      for (PuzzleState neighbor in _getNeighbors(currentState)) {
-        if (closedSet.contains(neighbor.id)) continue;
-
-        // Si el vecino ya está en la lista OPEN con un costo 'f' menor o igual, omitimos
-        bool existsInOpenWithBetterF = openList.any(
-          (node) => node.id == neighbor.id && node.f <= neighbor.f,
-        );
-
-        if (!existsInOpenWithBetterF) {
-          openList.add(neighbor);
-        }
+      if (solutionMoves.isEmpty) {
+        messages.add('No se encontró solución dentro del límite de búsqueda.');
+      } else {
+        await _animateSolution(puzzleController, solutionMoves);
       }
+    } finally {
+      _isSolving = false;
+      notifyListeners();
     }
 
-    return []; // No se encontró solución
+    return messages;
   }
 
-  // ==========================================
-  // 10. RECONSTRUIR CAMINO & 11. LISTA DE MOVIMIENTOS
-  // ==========================================
-  List<int> _reconstructPath(PuzzleState targetState) {
-    List<int> tileMovesToExecute = [];
-    PuzzleState? curr = targetState;
-
-    // Recorremos hacia atrás desde el estado resuelto hasta el estado inicial
-    while (curr?.parent != null) {
-      if (curr!.clickedTileIndex != null) {
-        // CORRECCIÓN 3: Guardar la posición de la ficha tocada, no del espacio vacío
-        tileMovesToExecute.add(curr.clickedTileIndex!);
-      }
-      curr = curr.parent;
-    }
-
-    // 11. Devolvemos la lista en el orden correcto (del inicio a la solución)
-    return tileMovesToExecute.reversed.toList();
-  }
-
-  // ==========================================
-  // 12. ANIMAR EN FLUTTER
-  // ==========================================
   Future<void> _animateSolution(
     PuzzleController puzzleController,
     List<int> moves,
   ) async {
-    for (int targetIndex in moves) {
-      // Ejecutar movimiento real simulando el clic sobre la pieza correspondiente
+    for (final int targetIndex in moves) {
       puzzleController.moveTile(targetIndex);
-
-      // Pausa entre movimientos para lograr una animación fluida
-      await Future.delayed(const Duration(milliseconds: 300));
+      await Future.delayed(const Duration(milliseconds: 220));
     }
   }
+}
+
+// ==========================================
+// FUNCIONES DE NIVEL SUPERIOR (corren en un isolate vía compute())
+// ==========================================
+
+/// Punto de entrada para `compute()`. Debe ser una función de nivel superior
+/// (no un método de instancia) para poder ejecutarse en otro isolate.
+List<int> _runAStarIsolate(_AStarParams params) {
+  final PuzzleState startState = PuzzleState(
+    board: params.board,
+    emptyIndex: params.emptyIndex,
+    gridSize: params.gridSize,
+    g: 0,
+    h: _heuristic(params.board, params.gridSize, params.blankValue),
+  );
+
+  // Cola de prioridad por f = g + h: O(log n) para insertar y extraer el
+  // mínimo, en vez de ordenar una lista completa en cada iteración.
+  final PriorityQueue<PuzzleState> openQueue = PriorityQueue<PuzzleState>(
+    (a, b) => a.f != b.f ? a.f.compareTo(b.f) : a.h.compareTo(b.h),
+  );
+  openQueue.add(startState);
+
+  // Mejor costo `g` conocido para cada tablero visto, en O(1). Reemplaza el
+  // `Set` + `List.any()` (búsquedas lineales) de la versión anterior.
+  final Map<String, int> bestG = {startState.id: 0};
+
+  int nodesExplored = 0;
+
+  while (openQueue.isNotEmpty) {
+    final PuzzleState current = openQueue.removeFirst();
+    nodesExplored++;
+
+    if (current.isSolved()) {
+      return _reconstructPath(current);
+    }
+
+    if (nodesExplored > AlgorithmController._maxNodesExplored) {
+      return const [];
+    }
+
+    // Si ya encontramos un camino mejor (o igual) hacia este mismo tablero
+    // después de encolar este nodo, lo saltamos.
+    if (current.g > (bestG[current.id] ?? 1 << 30)) continue;
+
+    for (final PuzzleState neighbor in _getNeighbors(current, params.blankValue)) {
+      final int? knownG = bestG[neighbor.id];
+      if (knownG == null || neighbor.g < knownG) {
+        bestG[neighbor.id] = neighbor.g;
+        openQueue.add(neighbor);
+      }
+    }
+  }
+
+  return const [];
+}
+
+List<PuzzleState> _getNeighbors(PuzzleState state, int blankValue) {
+  final List<PuzzleState> neighbors = [];
+  final int emptyIdx = state.emptyIndex;
+  final int size = state.gridSize;
+
+  final int row = emptyIdx ~/ size;
+  final int col = emptyIdx % size;
+
+  final List<int?> targets = [
+    row > 0 ? emptyIdx - size : null, // arriba
+    row < size - 1 ? emptyIdx + size : null, // abajo
+    col > 0 ? emptyIdx - 1 : null, // izquierda
+    col < size - 1 ? emptyIdx + 1 : null, // derecha
+  ];
+
+  for (final int? targetIdx in targets) {
+    if (targetIdx == null) continue;
+
+    final List<int> newBoard = List<int>.from(state.board);
+    newBoard[emptyIdx] = state.board[targetIdx];
+    newBoard[targetIdx] = state.board[emptyIdx];
+
+    final int newG = state.g + 1;
+
+    neighbors.add(
+      PuzzleState(
+        board: newBoard,
+        emptyIndex: targetIdx,
+        gridSize: size,
+        parent: state,
+        clickedTileIndex: targetIdx,
+        g: newG,
+        h: _heuristic(newBoard, size, blankValue),
+      ),
+    );
+  }
+
+  return neighbors;
+}
+
+/// Distancia de Manhattan + conflicto lineal: una heurística mucho más
+/// ajustada que Manhattan sola, clave para que 4x4 (15-puzzle) sea resoluble
+/// en un tiempo razonable con A* clásico.
+int _heuristic(List<int> board, int gridSize, int blankValue) {
+  int manhattan = 0;
+
+  for (int index = 0; index < board.length; index++) {
+    final int value = board[index];
+    if (value == blankValue) continue;
+
+    final int curRow = index ~/ gridSize;
+    final int curCol = index % gridSize;
+    final int targetRow = value ~/ gridSize;
+    final int targetCol = value % gridSize;
+
+    manhattan += (curRow - targetRow).abs() + (curCol - targetCol).abs();
+  }
+
+  return manhattan + 2 * _linearConflicts(board, gridSize, blankValue);
+}
+
+int _linearConflicts(List<int> board, int gridSize, int blankValue) {
+  int conflicts = 0;
+
+  // Conflictos por fila
+  for (int row = 0; row < gridSize; row++) {
+    final List<int> rowValues = [];
+    for (int col = 0; col < gridSize; col++) {
+      final int value = board[row * gridSize + col];
+      if (value == blankValue) continue;
+      if (value ~/ gridSize == row) rowValues.add(value);
+    }
+    conflicts += _countConflictsInLine(rowValues);
+  }
+
+  // Conflictos por columna
+  for (int col = 0; col < gridSize; col++) {
+    final List<int> colValues = [];
+    for (int row = 0; row < gridSize; row++) {
+      final int value = board[row * gridSize + col];
+      if (value == blankValue) continue;
+      if (value % gridSize == col) colValues.add(value);
+    }
+    conflicts += _countConflictsInLine(colValues);
+  }
+
+  return conflicts;
+}
+
+/// Cuenta pares de piezas fuera de orden dentro de una misma fila/columna
+/// objetivo (conflicto lineal clásico de Hansson/Mayer/Yung).
+int _countConflictsInLine(List<int> values) {
+  int conflicts = 0;
+  for (int i = 0; i < values.length; i++) {
+    for (int j = i + 1; j < values.length; j++) {
+      if (values[i] > values[j]) conflicts++;
+    }
+  }
+  return conflicts;
+}
+
+List<int> _reconstructPath(PuzzleState targetState) {
+  final List<int> moves = [];
+  PuzzleState? current = targetState;
+
+  while (current?.parent != null) {
+    moves.add(current!.clickedTileIndex!);
+    current = current.parent;
+  }
+
+  return moves.reversed.toList();
 }

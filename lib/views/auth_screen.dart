@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import '../database/db_helper.dart';
 import '../models/user.dart';
 import '../theme/app_colors.dart';
-import 'puzzle_screen.dart';
+import 'main_shell.dart';
 
 /// Pantalla única de acceso: alterna entre Iniciar sesión y Crear cuenta
 /// mediante un interruptor, en vez de usar dos pantallas separadas.
@@ -109,7 +109,7 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
     if (user != null) {
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (context) => PuzzleScreen(user: user)),
+        MaterialPageRoute(builder: (context) => MainShell(user: user)),
       );
     } else {
       _showMessage('Credenciales incorrectas');
