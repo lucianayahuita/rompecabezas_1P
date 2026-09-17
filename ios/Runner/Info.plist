@@ -26,6 +26,10 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Usamos la cámara para que puedas tomar una foto y armar tu propio rompecabezas.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Usamos tu galería para que puedas elegir una foto y armar tu propio rompecabezas.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

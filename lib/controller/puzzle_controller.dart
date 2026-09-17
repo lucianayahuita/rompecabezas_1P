@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import '../models/puzzle_tile.dart';
@@ -117,6 +118,10 @@ class PuzzleController extends ChangeNotifier {
         maxHeight: 1080,
         imageQuality: 90,
       );
+
+      // El picker nativo de iOS (cámara y PHPicker de galería) a veces deja
+      // el teclado del sistema visible al cerrarse. Lo forzamos a ocultarse.
+      await SystemChannels.textInput.invokeMethod('TextInput.hide');
 
       if (photo == null) {
         isLoading = false;
