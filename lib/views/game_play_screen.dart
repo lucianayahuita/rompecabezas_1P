@@ -222,7 +222,7 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
               Expanded(
                 child: _glassButton(
                   icon: Icons.travel_explore_rounded,
-                  label: 'Unsplash',
+                  label: 'Explorar',
                   onTap: _pickFromUnsplash,
                 ),
               ),
