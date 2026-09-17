@@ -40,7 +40,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
     if (result != -1 && mounted) {
       _showMessage('¡Cuenta registrada con éxito!');
-      Navigator.pop(context); // Regresa a la pantalla anterior
+      Navigator.pop(context);
     } else if (mounted) {
       _showMessage('El correo ya se encuentra registrado');
     }
@@ -53,158 +53,184 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: true, // Manejo seguro del teclado virtual
       backgroundColor: AppColors.background,
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const SizedBox(height: 10),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: IntrinsicHeight(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const SizedBox(height: 10),
 
-              // Ilustración / Banner Superior
-              Center(
-                child: Container(
-                  height: 160,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(20),
+                      // Ilustración / Banner Superior
+                      Center(
+                        child: Container(
+                          height: 140,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: const Icon(Icons.pets, size: 80, color: AppColors.primary),
+                        ),
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      // Título
+                      const Text(
+                        'Registrate',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+
+                      const SizedBox(height: 20),
+
+                      // Campo Nombre de Usuario
+                      const Text(
+                        'Nombre de Usuario',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      TextField(
+                        controller: _usernameController,
+                        decoration: const InputDecoration(
+                          hintText: 'Ej. Juan123',
+                        ),
+                      ),
+
+                      const SizedBox(height: 14),
+
+                      // Campo Usuario / Email
+                      const Text(
+                        'Correo',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      TextField(
+                        controller: _emailController,
+                        keyboardType: TextInputType.emailAddress,
+                        decoration: const InputDecoration(
+                          hintText: 'acbd@gmail.com',
+                        ),
+                      ),
+
+                      const SizedBox(height: 14),
+
+                      // Campo Contraseña
+                      const Text(
+                        'Contrasena',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      TextField(
+                        controller: _passwordController,
+                        obscureText: _obscurePassword,
+                        decoration: InputDecoration(
+                          hintText: '***************',
+                          suffixIconConstraints: const BoxConstraints(
+                            minWidth: 48,
+                            minHeight: 48,
+                          ),
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              _obscurePassword
+                                  ? Icons.visibility_off_outlined
+                                  : Icons.visibility_outlined,
+                              color: AppColors.primary,
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                _obscurePassword = !_obscurePassword;
+                              });
+                            },
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 14),
+
+                      // Campo Repetir Contraseña
+                      const Text(
+                        'Repetir contrasena',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      TextField(
+                        controller: _confirmPasswordController,
+                        obscureText: _obscureConfirmPassword,
+                        decoration: InputDecoration(
+                          hintText: '***************',
+                          suffixIconConstraints: const BoxConstraints(
+                            minWidth: 48,
+                            minHeight: 48,
+                          ),
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              _obscureConfirmPassword
+                                  ? Icons.visibility_off_outlined
+                                  : Icons.visibility_outlined,
+                              color: AppColors.primary,
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                _obscureConfirmPassword = !_obscureConfirmPassword;
+                              });
+                            },
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 24),
+
+                      // Botón Sign Up
+                      ElevatedButton(
+                        onPressed: _register,
+                        child: const Text('Sign Up'),
+                      ),
+
+                      const Spacer(),
+
+                      const SizedBox(height: 16),
+
+                      // Divisor inferior con mensaje
+                      const Divider(color: AppColors.primary, thickness: 1),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Juega y diviertete',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: AppColors.textPrimary,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
                   ),
-                  child: const Icon(Icons.pets, size: 90, color: AppColors.primary),
                 ),
               ),
-
-              const SizedBox(height: 12),
-
-              // Título
-              const Text(
-                'Registrate',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-
-              const SizedBox(height: 20),
-
-              // Campo Nombre de Usuario
-              const Text(
-                'Nombre de Usuario',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 6),
-              TextField(
-                controller: _usernameController,
-                decoration: const InputDecoration(
-                  hintText: 'Ej. Juan123',
-                ),
-              ),
-
-              const SizedBox(height: 14),
-
-              // Campo Usuario / Email
-              const Text(
-                'Correo',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 6),
-              TextField(
-                controller: _emailController,
-                decoration: const InputDecoration(
-                  hintText: 'acbd@gmail.com',
-                ),
-              ),
-
-              const SizedBox(height: 14),
-
-              // Campo Contraseña
-              const Text(
-                'Contrasena',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 6),
-              TextField(
-                controller: _passwordController,
-                obscureText: _obscurePassword,
-                decoration: InputDecoration(
-                  hintText: '***************',
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                      color: AppColors.primary,
-                    ),
-                    onPressed: () {
-                      setState(() {
-                        _obscurePassword = !_obscurePassword;
-                      });
-                    },
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 14),
-
-              // Campo Repetir Contraseña
-              const Text(
-                'Repetir contrasena',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 6),
-              TextField(
-                controller: _confirmPasswordController,
-                obscureText: _obscureConfirmPassword,
-                decoration: InputDecoration(
-                  hintText: '***************',
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscureConfirmPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                      color: AppColors.primary,
-                    ),
-                    onPressed: () {
-                      setState(() {
-                        _obscureConfirmPassword = !_obscureConfirmPassword;
-                      });
-                    },
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 24),
-
-              // Botón Sign Up
-              ElevatedButton(
-                onPressed: _register,
-                child: const Text('Sign Up'),
-              ),
-
-              const SizedBox(height: 24),
-
-              // Divisor inferior con mensaje
-              const Divider(color: AppColors.primary, thickness: 1),
-              const SizedBox(height: 8),
-              const Text(
-                'Juega y diviertete',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: AppColors.textPrimary,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
+            );
+          },
         ),
       ),
     );

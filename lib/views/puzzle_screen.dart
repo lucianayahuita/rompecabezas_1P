@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/user.dart';
 import '../theme/app_colors.dart';
+import 'game_play_screen.dart'; // Importar la pantalla de juego
 
 class PuzzleScreen extends StatelessWidget {
   final User user;
@@ -9,7 +10,6 @@ class PuzzleScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Nombre a mostrar (usa username o extrae el nombre del correo)
     final displayName = (user.username != null && user.username!.isNotEmpty)
         ? user.username
         : user.email.split('@').first;
@@ -34,7 +34,7 @@ class PuzzleScreen extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '¡Hola, $displayName! ',
+                '¡Hola, $displayName! 👋',
                 style: const TextStyle(
                   fontSize: 26,
                   fontWeight: FontWeight.bold,
@@ -51,7 +51,7 @@ class PuzzleScreen extends StatelessWidget {
               ),
               const SizedBox(height: 24),
 
-              // Lista de Niveles
+              // Lista de Niveles según la Rúbrica (2x2, 3x3, 4x4)
               Expanded(
                 child: ListView(
                   children: [
@@ -59,9 +59,9 @@ class PuzzleScreen extends StatelessWidget {
                       context,
                       title: 'Fácil (2x2)',
                       description: '4 piezas • Ideal para principiantes',
-                      icon: Icons.grid_3x3,
+                      icon: Icons.grid_view,
                       color: Colors.greenAccent,
-                      levelKey: '2x2',
+                      gridSize: 2,
                     ),
                     _buildLevelCard(
                       context,
@@ -69,15 +69,15 @@ class PuzzleScreen extends StatelessWidget {
                       description: '9 piezas • Desafío moderado',
                       icon: Icons.grid_3x3,
                       color: Colors.orangeAccent,
-                      levelKey: '4x4',
+                      gridSize: 3,
                     ),
                     _buildLevelCard(
                       context,
-                      title: 'Difícil (5x5)',
-                      description: '25 piezas • Para expertos',
-                      icon: Icons.grid_on,
+                      title: 'Difícil (4x4)',
+                      description: '16 piezas • Para expertos',
+                      icon: Icons.grid_4x4,
                       color: Colors.redAccent,
-                      levelKey: '5x5',
+                      gridSize: 4,
                     ),
                   ],
                 ),
@@ -95,7 +95,7 @@ class PuzzleScreen extends StatelessWidget {
     required String description,
     required IconData icon,
     required Color color,
-    required String levelKey,
+    required int gridSize,
   }) {
     return Card(
       color: AppColors.cardBackground,
@@ -124,10 +124,13 @@ class PuzzleScreen extends StatelessWidget {
         ),
         trailing: const Icon(Icons.arrow_forward_ios, color: Colors.white54, size: 18),
         onTap: () {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Seleccionaste el nivel $title')),
+          // Navega a la pantalla de juego enviando el tamaño de la cuadrícula
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => GamePlayScreen(gridSize: gridSize),
+            ),
           );
-          // TODO: Navegar al tablero de juego del rompecabezas pasando 'levelKey'
         },
       ),
     );
