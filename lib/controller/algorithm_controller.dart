@@ -11,8 +11,8 @@ class PuzzleState {
   final PuzzleState? parent;
   final int? clickedTileIndex;
 
-  final int g;
-  final int h;
+  final int g; // Costo del camino
+  final int h; // Estimación de la heurística de cuantos movimientos faltan para resolverlo
 
   PuzzleState({
     required this.board,
@@ -154,9 +154,7 @@ class AlgorithmController extends ChangeNotifier {
   }
 }
 
-// ==========================================
-// FUNCIONES DE NIVEL SUPERIOR (corren en un isolate vía compute())
-// ==========================================
+// FUNCIONES PARA EL ALGORITMO
 
 /// Punto de entrada para `compute()`. Debe ser una función de nivel superior
 /// (no un método de instancia) para poder ejecutarse en otro isolate.
@@ -197,11 +195,15 @@ List<int> _runAStarIsolate(_AStarParams params) {
     // Si ya encontramos un camino mejor (o igual) hacia este mismo tablero
     // después de encolar este nodo, lo saltamos.
     if (current.g > (bestG[current.id] ?? 1 << 30)) continue;
-
+    // Obtiene los tableros resultantes de mover la ficha de arriba, abajo, izquierda o derecha hacia el espacio vacío y recorre cada uno de ellos.
     for (final PuzzleState neighbor in _getNeighbors(current, params.blankValue)) {
+      // Consulta en el registro de memoria (bestG) si ya se había visitado esta misma disposición de tablero anteriormente y, de ser así, cuál fue el costo de movimientos (g) necesario para llegar a ella.
       final int? knownG = bestG[neighbor.id];
+      // Consulta si es un camino que ya conocia o si es un camino más corto que el conocido, en cuyo caso lo agrega a la cola de prioridad para seguir explorando.
       if (knownG == null || neighbor.g < knownG) {
+        //actualiza la bd guardando este mejor costo como la mejor ruta conocida 
         bestG[neighbor.id] = neighbor.g;
+        // Ingresa la jugada a la Cola de Prioridad (openQueue) para que A* la analice en los próximos ciclos según su valor de prioridad f = g + h
         openQueue.add(neighbor);
       }
     }
@@ -209,7 +211,7 @@ List<int> _runAStarIsolate(_AStarParams params) {
 
   return const [];
 }
-
+// Funcion que genera todos los vecinos posibles, comprueba en que direcciones es legal mover una ficha 
 List<PuzzleState> _getNeighbors(PuzzleState state, int blankValue) {
   final List<PuzzleState> neighbors = [];
   final int emptyIdx = state.emptyIndex;
@@ -224,7 +226,9 @@ List<PuzzleState> _getNeighbors(PuzzleState state, int blankValue) {
     col > 0 ? emptyIdx - 1 : null, // izquierda
     col < size - 1 ? emptyIdx + 1 : null, // derecha
   ];
-
+  // Recorre los movimientos adyacentes válidos para simular el desplazamiento de cada ficha vecina al espacio vacío.
+  // Clona el tablero, intercambia las posiciones y calcula el nuevo costo acumulado (g) incrementando un paso.
+  // Crea y registra un nuevo nodo `PuzzleState` calculando su distancia estimada al objetivo con la función heurística.
   for (final int? targetIdx in targets) {
     if (targetIdx == null) continue;
 
@@ -250,9 +254,9 @@ List<PuzzleState> _getNeighbors(PuzzleState state, int blankValue) {
   return neighbors;
 }
 
-/// Distancia de Manhattan + conflicto lineal: una heurística mucho más
-/// ajustada que Manhattan sola, clave para que 4x4 (15-puzzle) sea resoluble
-/// en un tiempo razonable con A* clásico.
+// Calcula la estimación (h) de movimientos faltantes para alcanzar la solución del rompecabezas.
+// Suma la distancia Manhattan de cada ficha respecto a su posición objetivo en el tablero.
+// Penaliza el resultado agregando el doble de los conflictos lineales detectados en filas y columnas.
 int _heuristic(List<int> board, int gridSize, int blankValue) {
   int manhattan = 0;
 
@@ -270,7 +274,9 @@ int _heuristic(List<int> board, int gridSize, int blankValue) {
 
   return manhattan + 2 * _linearConflicts(board, gridSize, blankValue);
 }
-
+// Recorre cada fila y columna del tablero extrayendo las fichas presentes.
+// Identifica las piezas que ya alcanzaron su línea objetivo pero están bloqueándose mutuamente.
+// Acumula el total de inversiones de posición detectadas para refinar el cálculo heurístico.
 int _linearConflicts(List<int> board, int gridSize, int blankValue) {
   int conflicts = 0;
 
@@ -298,9 +304,9 @@ int _linearConflicts(List<int> board, int gridSize, int blankValue) {
 
   return conflicts;
 }
-
-/// Cuenta pares de piezas fuera de orden dentro de una misma fila/columna
-/// objetivo (conflicto lineal clásico de Hansson/Mayer/Yung).
+// Compara las fichas alineadas de dos en dos dentro de una misma fila o columna.
+// Incrementa el contador cuando una ficha con un número mayor precede a una menor.
+// Devuelve la cantidad exacta de cruces o bloqueos entre piezas en esa misma línea.
 int _countConflictsInLine(List<int> values) {
   int conflicts = 0;
   for (int i = 0; i < values.length; i++) {
